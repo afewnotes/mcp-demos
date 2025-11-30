@@ -1,0 +1,5 @@
+.venv
+.vscode
+.env
+/file_server/test-files
+/file_server/__pycache__
