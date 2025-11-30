@@ -3,3 +3,4 @@
 .env
 /file_server/test-files
 /file_server/__pycache__
+/database/__pycache__
