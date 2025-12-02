@@ -17,7 +17,7 @@ async def run_demo():
     
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
-            await session.initialize()
+            # await session.initialize()
             
             # 2. 创建分析Agent
             agent = DataAnalysisAgent(session)

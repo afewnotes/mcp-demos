@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 from typing import Any, Sequence
 from mcp.server import Server
 from mcp.types import Tool, TextContent
@@ -27,7 +28,7 @@ class DatabaseMCPServer:
         """SQL安全检查 - 使用SQLSafetyChecker"""
         is_safe, msg = SQLSafetyChecker.check(sql)
         if not is_safe:
-            print(f"SQL安全检查失败: {msg}")
+            print(f"SQL安全检查失败: {msg}", file=sys.stderr)
         return is_safe
     
     def _register_handlers(self):

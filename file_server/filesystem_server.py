@@ -21,7 +21,7 @@ class FilesystemMCPServer:
         return {
             "read_file": {
                 "description": "读取指定文件的内容",
-                "parameters": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "path": {"type": "string", "description": "文件路径"}
@@ -29,9 +29,20 @@ class FilesystemMCPServer:
                     "required": ["path"]
                 }
             },
+            "write_file": {
+                "description": "写入内容到指定文件",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "文件路径"},
+                        "content": {"type": "string", "description": "文件内容"}
+                    },
+                    "required": ["path", "content"]
+                }
+            },
             "search_files": {
                 "description": "在目录中搜索包含关键词的文件",
-                "parameters": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "directory": {"type": "string", "description": "搜索目录"},
@@ -42,7 +53,7 @@ class FilesystemMCPServer:
             },
             "list_directory": {
                 "description": "列出目录中的所有文件和子目录",
-                "parameters": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "path": {"type": "string", "description": "目录路径"}
@@ -83,6 +94,28 @@ class FilesystemMCPServer:
             }
         except Exception as e:
             return {"error": f"读取失败:{str(e)}"}
+    
+    async def write_file(self, path: str, content: str) -> dict:
+        """写入文件内容"""
+        if not self._is_path_allowed(path):
+            return {"error": f"访问被拒绝:{path}不在允许的目录中"}
+        
+        try:
+            file_path = Path(path)
+            
+            # 确保父目录存在
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 写入文件
+            file_path.write_text(content, encoding='utf-8')
+            
+            return {
+                "path": str(file_path),
+                "size": len(content),
+                "message": "文件写入成功"
+            }
+        except Exception as e:
+            return {"error": f"写入失败:{str(e)}"}
     
     async def search_files(self, directory: str, keyword: str) -> dict:
         """搜索包含关键词的文件"""
@@ -146,13 +179,37 @@ class FilesystemMCPServer:
         method = request.get("method")
         params = request.get("params", {})
         
+        # 初始化握手
+        if method == "initialize":
+            return {
+                "jsonrpc": "2.0",
+                "id": request.get("id"),
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "serverInfo": {
+                        "name": "filesystem-server",
+                        "version": "1.0.0"
+                    }
+                }
+            }
+        
+        if method == "notifications/initialized":
+            return None
+
         # 列出可用工具
         if method == "tools/list":
             return {
-                "tools": [
-                    {"name": name, **info}
-                    for name, info in self.tools.items()
-                ]
+                "jsonrpc": "2.0",
+                "id": request.get("id"),
+                "result": {
+                    "tools": [
+                        {"name": name, **info}
+                        for name, info in self.tools.items()
+                    ]
+                }
             }
         
         # 调用工具
@@ -160,20 +217,39 @@ class FilesystemMCPServer:
             tool_name = params.get("name")
             tool_args = params.get("arguments", {})
             
-            if tool_name == "read_file":
-                return await self.read_file(**tool_args)
-            elif tool_name == "search_files":
-                return await self.search_files(**tool_args)
-            elif tool_name == "list_directory":
-                return await self.list_directory(**tool_args)
-            else:
-                return {"error": f"未知工具:{tool_name}"}
+            try:
+                if tool_name == "read_file":
+                    result = await self.read_file(**tool_args)
+                elif tool_name == "write_file":
+                    result = await self.write_file(**tool_args)
+                elif tool_name == "search_files":
+                    result = await self.search_files(**tool_args)
+                elif tool_name == "list_directory":
+                    result = await self.list_directory(**tool_args)
+                else:
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": request.get("id"),
+                        "error": {"code": -32601, "message": f"未知工具:{tool_name}"}
+                    }
+                
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "result": {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]}
+                }
+            except Exception as e:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request.get("id"),
+                    "error": {"code": -32000, "message": str(e)}
+                }
         
         return {"error": f"未知方法:{method}"}
     
     async def run(self):
         """启动服务器(标准输入输出通信)"""
-        print("MCP文件系统服务器已启动", flush=False)
+        print("MCP文件系统服务器已启动", file=sys.stderr, flush=True)
         while True:
             try:
                 line = await asyncio.get_event_loop().run_in_executor(
@@ -181,7 +257,8 @@ class FilesystemMCPServer:
                 )
                 request = json.loads(line)
                 response = await self.handle_request(request)
-                print(json.dumps(response), flush=True)
+                if response is not None:
+                    print(json.dumps(response), flush=True)
             except EOFError:
                 break
             except Exception as e:
